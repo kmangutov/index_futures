@@ -5,15 +5,15 @@
 CONFIG_TIMES = [
     {
         'lastTradeDateOrContractMonth': '202306',
-        'endDateTime': '20230320-00:00:00'
+        'endDateTime': '20230401-00:00:00'
     },
     {
         'lastTradeDateOrContractMonth': '202309',
-        'endDateTime': '20230320-00:00:00'
+        'endDateTime': '20230401-00:00:00'
     },
     {
         'lastTradeDateOrContractMonth': '202312',
-        'endDateTime': '20230320-00:00:00'
+        'endDateTime': '20230401-00:00:00'
     }
 ]
 
