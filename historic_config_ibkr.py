@@ -48,12 +48,52 @@ CONFIG_CONTRACTS = [
         'secType': 'FUT',
         'exchange': 'OSE.JPN',
         'currency': 'JPY'
-    }, 
+    }#, 
+    #{
+    #    #https://medium.com/@hochiho/grab-forex-data-from-interactive-brokers-using-python-74dd9e420b11
+    #    'symbol': 'KRW',
+    #    'secType': 'CASH',
+    #    'currency': 'USD',
+    #    'exchange': 'IDEALPRO'
+    #}
+]
+
+CONFIG_CURRENCIES = [
     {
         #https://medium.com/@hochiho/grab-forex-data-from-interactive-brokers-using-python-74dd9e420b11
         'symbol': 'KRW',
         'secType': 'CASH',
         'currency': 'USD',
         'exchange': 'IDEALPRO'
+    },
+    {
+        #https://medium.com/@hochiho/grab-forex-data-from-interactive-brokers-using-python-74dd9e420b11
+        'symbol': 'USD',
+        'secType': 'CASH',
+        'currency': 'HKD',
+        'exchange': 'IDEALPRO'
+    },
+    {
+        #https://medium.com/@hochiho/grab-forex-data-from-interactive-brokers-using-python-74dd9e420b11
+        'symbol': 'USD',
+        'secType': 'CASH',
+        'currency': 'JPY',
+        'exchange': 'IDEALPRO'
     }
+]
+
+
+CONFIG_OILS = [
+    {
+        'symbol': 'CL',
+        'secType': 'FUT',
+        'exchange': 'NYMEX',
+        'currency': 'USD', 
+    },
+    {
+        'symbol': 'BZ',
+        'secType': 'FUT',
+        'exchange': 'NYMEX',
+        'currency': 'USD', 
+    },
 ]

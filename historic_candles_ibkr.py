@@ -3,7 +3,7 @@ from ibapi.wrapper import EWrapper
 from ibapi.contract import Contract
 import threading
 import json
-from historic_config_ibkr import CONFIG_CONTRACTS, CONFIG_TIMES
+from historic_config_ibkr import CONFIG_OILS, CONFIG_CURRENCIES, CONFIG_CONTRACTS, CONFIG_TIMES
 import csv
 import time
 
@@ -11,6 +11,8 @@ from datetime import datetime
 import pytz
 import h5py
 import numpy as np
+
+from queue import Queue
 
 # Existing solution, should this be used instead?
 # download_bars.py
@@ -23,75 +25,56 @@ CSV_HEADER = ['timestamp', 'open', 'high', 'low', 'close', 'volume', 'barCount',
 
 
 def datetimeStringToUnix(datetime_str):
-    # Define the concatenated string datetime and the timezone
-    # datetime_str = '20230102 10:00:00 Japan'
-
-    # Parse the string datetime into a datetime object
     date = datetime.strptime(datetime_str[:17], '%Y%m%d %H:%M:%S')
-
-    # Get the timezone from the string and create a timezone object
     timezone_str = datetime_str[18:]
     timezone = pytz.timezone(timezone_str)
 
-    # Adjust the datetime object for the given timezone
     date_timezone = timezone.localize(date)
     unix_timestamp = int(date_timezone.timestamp())
 
-    #print(unix_timestamp)
     return unix_timestamp
+
 
 # https://interactivebrokers.github.io/tws-api/interfaceIBApi_1_1EWrapper.html
 # https://interactivebrokers.github.io/tws-api/classIBApi_1_1EClient.html
 class App(EClient, EWrapper):
-    def __init__(self):
+    def __init__(self, contracts, times):
         EClient.__init__(self, wrapper = self)
         self.writer = None
+
+        self.queue = Queue()
         
     def error(self, reqId, errorCode, errorString, json):
         print("Error {} {} {}".format(reqId,errorCode,errorString))
 
-    count = 0
-
     def setWriter(self, writer):
         self.writer = writer
-        # print('dtpye: ' + str(self.writer.dtype))
 
+    def send_done(self, code):
+        print(f'Sending code {code}')
+        self.queue.put(code)
+
+    def wait_done(self):
+        print('Waiting for thread to finish ...')
+        code = self.queue.get()
+        print(f'Received code {code}')
+        self.queue.task_done()
+        return code
 
     def historicalData(self, reqId, bar):
-        self.count = self.count + 1
-        print('a')
         new_ohlc_data = (datetimeStringToUnix(bar.date), float(bar.open), float(bar.high), float(bar.low), float(bar.close), int(bar.volume), int(bar.barCount), float(bar.wap))
 
-        if not self.writer:
-            print('historicalData: ' + str(new_ohlc_data))
-            return
-
-        #if False:
-        #    if len(self.writer) == 0:
-        #        self.writer.resize(1, axis=0)
-        #        self.writer[0] = np.array(new_ohlc_data, dtype=self.writer.dtype)
-        #    else:
-        #        self.writer.resize(len(self.writer) + len(new_ohlc_data), axis=0)
-        #        self.writer[-len(new_ohlc_data):] = np.array(new_ohlc_data, dtype=self.writer.dtype)
-        #else:
-        
-        #if len(self.writer) == 0:
-        #    self.writer.resize(1, axis=0)
-        #    self.writer[0] = np.array([new_ohlc_data], dtype=self.writer.dtype)
-        #else:
-        #    self.writer.resize(len(self.writer) + len(new_ohlc_data), axis=0)
-        #    self.writer[-len(new_ohlc_data):] = np.array([new_ohlc_data], dtype=self.writer.dtype)
+        print('historicalData: ' + str(new_ohlc_data))
 
         self.writer.resize(len(self.writer) + 1, axis=0)
         self.writer[-1] = new_ohlc_data
         self.writer.flush()
 
     def historicalDataEnd(self, reqId, start, end):
-        print('end')
+        self.send_done(0)
 
 
-def downloadHistoric(app, config_contract, config_time):
-
+def downloadHistoric(app, config_contract, config_time, debug=False):
     contract = Contract()
     contract.symbol = config_contract['symbol']  # "ES"
     contract.secType = config_contract['secType'] # "FUT"
@@ -110,16 +93,19 @@ def downloadHistoric(app, config_contract, config_time):
         whatToShow = 'MIDPOINT'
 
     print(str(contract))
-    app.reqHistoricalData(reqId=1, contract=contract, endDateTime=endDateTime, durationStr='1 W',
-            barSizeSetting='1 hour', whatToShow=whatToShow, useRTH=True, formatDate=1, keepUpToDate=False, 
-            chartOptions=[])
 
-    # Needed because downloading happen in separate thread
-    # TODO: In App override historicalEnd and use that to communicate finish
-    time.sleep(30)
+    if debug:
+        app.reqHistoricalData(reqId=1, contract=contract, endDateTime=endDateTime, durationStr='1 W',
+                barSizeSetting='1 hour', whatToShow=whatToShow, useRTH=True, formatDate=1, keepUpToDate=False, 
+                chartOptions=[])
+    else:
+        app.reqHistoricalData(reqId=1, contract=contract, endDateTime=endDateTime, durationStr='6 M',
+                barSizeSetting='1 min', whatToShow=whatToShow, useRTH=True, formatDate=1, keepUpToDate=False, 
+                chartOptions=[])
+
+
 
 def main():
-    ## Init
     LIVE_PORTS = [7496, 4001]
     SIMULATED_PORTS = [7497, 4002]
 
@@ -128,7 +114,7 @@ def main():
 
     print(f'\n- Connect {host}:{str(port)}')
 
-    app = App()
+    app = App(CONFIG_CONTRACTS, CONFIG_TIMES)
     app.connect(host, port, clientId = 1)
 
     def run_loop():
@@ -143,32 +129,75 @@ def main():
     print(str(CONFIG_CONTRACTS))
     print(str(CONFIG_TIMES))
 
-    #for CONFIG_TIME in CONFIG_TIMES:
-    #    for CONFIG_CONTRACT in CONFIG_CONTRACTS:
+    # INDEX FUTURES
+    if False:
+        for CONFIG_TIME in CONFIG_TIMES:
+            for CONFIG_CONTRACT in CONFIG_CONTRACTS:
+                filename = '%s_%s_%s_%s_%s' % (CONFIG_TIME['lastTradeDateOrContractMonth'], CONFIG_CONTRACT['exchange'], CONFIG_CONTRACT['symbol'], CONFIG_CONTRACT['secType'], CONFIG_CONTRACT['currency'])
 
-    # Hardcoaded 1 by 1 for now
-    CONFIG_CONTRACT = CONFIG_CONTRACTS[4]
-    CONFIG_TIME = CONFIG_TIMES[0]
+                f =  h5py.File('data_hdf5/%s.h5' % filename, 'a')
+                ohlc_dataset = f.create_dataset('bars', shape=(0,), maxshape=(None,), chunks=True, dtype=[
+                    ('timestamp', 'i8'),
+                    ('open', 'f8'),
+                    ('high', 'f8'),
+                    ('low', 'f8'),
+                    ('close', 'f8'),
+                    ('volume', 'i8'),
+                    ('barCount', 'i8'),
+                    ('wap', 'f8')
+                ])
+                app.setWriter(ohlc_dataset)
+                downloadHistoric(app, CONFIG_CONTRACT, CONFIG_TIME)
+                code = app.wait_done()
+                time.sleep(2)
 
-    filename = '%s_%s_%s_%s_%s' % (CONFIG_TIME['lastTradeDateOrContractMonth'], CONFIG_CONTRACT['exchange'], CONFIG_CONTRACT['symbol'], CONFIG_CONTRACT['secType'], CONFIG_CONTRACT['currency'])
+    # CURRENCIES
+    if False:
+        for CONFIG_CONTRACT in CONFIG_CURRENCIES:
+            filename = '%s_%s_%s_%s' % (CONFIG_CONTRACT['exchange'], CONFIG_CONTRACT['symbol'], CONFIG_CONTRACT['secType'], CONFIG_CONTRACT['currency'])
 
-    f =  h5py.File('data_hdf5/%s.h5' % filename, 'a')
-    ohlc_dataset = f.create_dataset('bars', shape=(0,), maxshape=(None,), chunks=True, dtype=[
-        ('timestamp', 'i8'),
-        ('open', 'f8'),
-        ('high', 'f8'),
-        ('low', 'f8'),
-        ('close', 'f8'),
-        ('volume', 'i8'),
-        ('barCount', 'i8'),
-        ('wap', 'f8')
-    ])
-    app.setWriter(ohlc_dataset)
+            f =  h5py.File('data_hdf5/%s.h5' % filename, 'a')
+            ohlc_dataset = f.create_dataset('bars', shape=(0,), maxshape=(None,), chunks=True, dtype=[
+                ('timestamp', 'i8'),
+                ('open', 'f8'),
+                ('high', 'f8'),
+                ('low', 'f8'),
+                ('close', 'f8'),
+                ('volume', 'i8'),
+                ('barCount', 'i8'),
+                ('wap', 'f8')
+            ])
+            app.setWriter(ohlc_dataset)
+
+            # CONFIG_TIMES only used for end date
+            downloadHistoric(app, CONFIG_CONTRACT, CONFIG_TIMES[0])
+            code = app.wait_done()
+            time.sleep(2)
+
+    # OIL FUTURES
+    if True:
+        for CONFIG_TIME in CONFIG_TIMES:
+            for CONFIG_CONTRACT in CONFIG_OILS:
+
+                filename = '%s_%s_%s_%s_%s' % (CONFIG_TIME['lastTradeDateOrContractMonth'], CONFIG_CONTRACT['exchange'], CONFIG_CONTRACT['symbol'], CONFIG_CONTRACT['secType'], CONFIG_CONTRACT['currency'])
+
+                f =  h5py.File('data_hdf5/%s.h5' % filename, 'a')
+                ohlc_dataset = f.create_dataset('bars', shape=(0,), maxshape=(None,), chunks=True, dtype=[
+                    ('timestamp', 'i8'),
+                    ('open', 'f8'),
+                    ('high', 'f8'),
+                    ('low', 'f8'),
+                    ('close', 'f8'),
+                    ('volume', 'i8'),
+                    ('barCount', 'i8'),
+                    ('wap', 'f8')
+                ])
+                app.setWriter(ohlc_dataset)
+                downloadHistoric(app, CONFIG_CONTRACT, CONFIG_TIME)
+                code = app.wait_done()
+                time.sleep(2)
     
-    # app.setWriter(None)
-    downloadHistoric(app, CONFIG_CONTRACT, CONFIG_TIME)
-
-    time.sleep(5)
+    app.disconnect()
 
 
 
