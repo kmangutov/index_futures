@@ -40,6 +40,8 @@ def datetimeStringToUnix(datetime_str):
     #print(unix_timestamp)
     return unix_timestamp
 
+# https://interactivebrokers.github.io/tws-api/interfaceIBApi_1_1EWrapper.html
+# https://interactivebrokers.github.io/tws-api/classIBApi_1_1EClient.html
 class App(EClient, EWrapper):
     def __init__(self):
         EClient.__init__(self, wrapper = self)
@@ -52,21 +54,40 @@ class App(EClient, EWrapper):
 
     def setWriter(self, writer):
         self.writer = writer
-        print('dtpye: ' + str(self.writer.dtype))
+        # print('dtpye: ' + str(self.writer.dtype))
 
 
     def historicalData(self, reqId, bar):
         self.count = self.count + 1
-
+        print('a')
         new_ohlc_data = (datetimeStringToUnix(bar.date), float(bar.open), float(bar.high), float(bar.low), float(bar.close), int(bar.volume), int(bar.barCount), float(bar.wap))
 
-        if len(self.writer) == 0:
-            self.writer.resize(1, axis=0)
-            self.writer[0] = np.array(new_ohlc_data, dtype=self.writer.dtype)
-        else:
-            self.writer.resize(len(self.writer) + len(new_ohlc_data), axis=0)
-            self.writer[-len(new_ohlc_data):] = np.array(new_ohlc_data, dtype=self.writer.dtype)
+        if not self.writer:
+            print('historicalData: ' + str(new_ohlc_data))
+            return
 
+        #if False:
+        #    if len(self.writer) == 0:
+        #        self.writer.resize(1, axis=0)
+        #        self.writer[0] = np.array(new_ohlc_data, dtype=self.writer.dtype)
+        #    else:
+        #        self.writer.resize(len(self.writer) + len(new_ohlc_data), axis=0)
+        #        self.writer[-len(new_ohlc_data):] = np.array(new_ohlc_data, dtype=self.writer.dtype)
+        #else:
+        
+        #if len(self.writer) == 0:
+        #    self.writer.resize(1, axis=0)
+        #    self.writer[0] = np.array([new_ohlc_data], dtype=self.writer.dtype)
+        #else:
+        #    self.writer.resize(len(self.writer) + len(new_ohlc_data), axis=0)
+        #    self.writer[-len(new_ohlc_data):] = np.array([new_ohlc_data], dtype=self.writer.dtype)
+
+        self.writer.resize(len(self.writer) + 1, axis=0)
+        self.writer[-1] = new_ohlc_data
+        self.writer.flush()
+
+    def historicalDataEnd(self, reqId, start, end):
+        print('end')
 
 
 def downloadHistoric(app, config_contract, config_time):
@@ -76,18 +97,26 @@ def downloadHistoric(app, config_contract, config_time):
     contract.secType = config_contract['secType'] # "FUT"
     contract.exchange = config_contract['exchange'] # "CME"
     contract.currency = config_contract['currency'] # "USD"
-    contract.lastTradeDateOrContractMonth = config_time['lastTradeDateOrContractMonth'] #"202306"
+    
+    if config_contract['secType'] != 'CASH':
+        contract.lastTradeDateOrContractMonth = config_time['lastTradeDateOrContractMonth'] #"202306"
 
     endDateTime = config_time['endDateTime'] # '20230401-00:00:00'
 
-    # change durationStr='1 D', to 6 M for prod run
-    app.reqHistoricalData(reqId=1, contract=contract, endDateTime=endDateTime, durationStr='6 M',
-            barSizeSetting='1 min', whatToShow='TRADES', useRTH=True, formatDate=1, keepUpToDate=False, 
+    # change durationStr='1  D', to 6 M for prod run
+    
+    whatToShow = 'TRADES'
+    if config_contract['secType'] == 'CASH':
+        whatToShow = 'MIDPOINT'
+
+    print(str(contract))
+    app.reqHistoricalData(reqId=1, contract=contract, endDateTime=endDateTime, durationStr='1 W',
+            barSizeSetting='1 hour', whatToShow=whatToShow, useRTH=True, formatDate=1, keepUpToDate=False, 
             chartOptions=[])
 
     # Needed because downloading happen in separate thread
     # TODO: In App override historicalEnd and use that to communicate finish
-    time.sleep(15)
+    time.sleep(30)
 
 def main():
     ## Init
@@ -109,6 +138,7 @@ def main():
     api_thread.start()
     ##
 
+    time.sleep(1)
 
     print(str(CONFIG_CONTRACTS))
     print(str(CONFIG_TIMES))
@@ -117,14 +147,13 @@ def main():
     #    for CONFIG_CONTRACT in CONFIG_CONTRACTS:
 
     # Hardcoaded 1 by 1 for now
-    CONFIG_CONTRACT = CONFIG_CONTRACTS[0]
+    CONFIG_CONTRACT = CONFIG_CONTRACTS[4]
     CONFIG_TIME = CONFIG_TIMES[0]
 
     filename = '%s_%s_%s_%s_%s' % (CONFIG_TIME['lastTradeDateOrContractMonth'], CONFIG_CONTRACT['exchange'], CONFIG_CONTRACT['symbol'], CONFIG_CONTRACT['secType'], CONFIG_CONTRACT['currency'])
 
     f =  h5py.File('data_hdf5/%s.h5' % filename, 'a')
-
-    ohlc_dataset = f.create_dataset('bars', shape=(0,), maxshape=(None,), chunks=True, data=np.array([], dtype=[
+    ohlc_dataset = f.create_dataset('bars', shape=(0,), maxshape=(None,), chunks=True, dtype=[
         ('timestamp', 'i8'),
         ('open', 'f8'),
         ('high', 'f8'),
@@ -133,8 +162,10 @@ def main():
         ('volume', 'i8'),
         ('barCount', 'i8'),
         ('wap', 'f8')
-    ]))
+    ])
     app.setWriter(ohlc_dataset)
+    
+    # app.setWriter(None)
     downloadHistoric(app, CONFIG_CONTRACT, CONFIG_TIME)
 
     time.sleep(5)
